@@ -2093,6 +2093,16 @@ void CSave::BufferHeader( const char *pname, int size )
 	BufferData( (const char *)&hashvalue, sizeof(short), sizeof(short) );
 }
 
+// Some processors take an exception on a misaligned floating point access
+// instead of fixing it up, and the save buffer offers no alignment to work
+// with: BufferData pads nothing, so a string field of any odd length leaves
+// every field after it at an arbitrary offset. Reading those through memcpy
+// costs nothing measurable and is always correct. ARM VFP has needed this all
+// along; PowerPC consoles are in the same position.
+#if defined( __VFP_FP__ ) || defined( __PPC__ ) || defined( __powerpc__ )
+#define SAVE_FP_THROUGH_MEMCPY 1
+#endif
+
 void CSave::BufferData( const char *pdata, int size, int typesize )
 {
 	if( !m_pdata )
@@ -2167,7 +2177,7 @@ int CRestore::ReadField( void *pBaseData, TYPEDESCRIPTION *pFields, int fieldCou
 					switch( pTest->fieldType )
 					{
 					case FIELD_TIME:
-					#if __VFP_FP__
+					#if defined( SAVE_FP_THROUGH_MEMCPY )
 						memcpy( &timeData, pInputData, 4 );
 						ULittleToHostSW( timeData );
 						// Re-base time variables
@@ -2255,7 +2265,7 @@ int CRestore::ReadField( void *pBaseData, TYPEDESCRIPTION *pFields, int fieldCou
 							*( (EOFFSET *)pOutputData ) = 0;
 						break;
 					case FIELD_VECTOR:
-						#if __VFP_FP__
+						#if defined( SAVE_FP_THROUGH_MEMCPY )
 						memcpy( pOutputData, pInputData, sizeof( Vector ) );
 						ULittleToHostSW( ( (float*)pOutputData)[0] );
 						ULittleToHostSW( ( (float*)pOutputData)[1] );
@@ -2267,7 +2277,7 @@ int CRestore::ReadField( void *pBaseData, TYPEDESCRIPTION *pFields, int fieldCou
 						#endif
 						break;
 					case FIELD_POSITION_VECTOR:
-						#if  __VFP_FP__
+						#if defined( SAVE_FP_THROUGH_MEMCPY )
 						{
 							Vector tmp;
 							memcpy( &tmp, pInputData, sizeof( Vector ) );
