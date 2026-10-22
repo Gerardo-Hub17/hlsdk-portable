@@ -46,6 +46,17 @@ void UpdateBeams( void )
 	// Determine our last predicted origin
 	HUD_GetLastOrg( (float *)&origin );
 
+	// previousorigin solo lo guarda HUD_WeaponsPostThink, que unicamente corre con
+	// CLIENT_WEAPONS. Sin eso se queda en (0,0,0) y el rayo del Gluon apuntaba siempre
+	// al origen del mapa (se veia fijo y vertical). Se usa la posicion de ojos actual,
+	// igual que EV_GetGunPosition para el jugador local.
+	if( origin[0] == 0.0f && origin[1] == 0.0f && origin[2] == 0.0f )
+	{
+		VectorCopy( pthisplayer->origin, origin );
+		gEngfuncs.pEventAPI->EV_LocalPlayerViewheight( view_ofs );
+		VectorAdd( origin, view_ofs, origin );
+	}
+
 	AngleVectors( angles, forward, right, up );
 
 	VectorCopy( origin, vecSrc );
