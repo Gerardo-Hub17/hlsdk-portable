@@ -203,7 +203,7 @@ int CCrowbar::Swing( int fFirst )
 #endif
 	if( fFirst )
 	{
-		PLAYBACK_EVENT_FULL( FEV_NOTHOST, m_pPlayer->edict(), m_usCrowbar, 
+		PLAYBACK_EVENT_FULL( WEAPON_EVENT_NOTHOST, m_pPlayer->edict(), m_usCrowbar, 
 		0.0f, g_vecZero, g_vecZero, 0, 0, 0,
 		0, 0, 0 );
 	}

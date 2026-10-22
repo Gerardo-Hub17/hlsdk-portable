@@ -18,6 +18,15 @@
 
 #include "effects.h"
 
+// FEV_NOTHOST hace que el servidor no mande el evento al jugador local cuando cl_lw es 1,
+// porque espera que el cliente lo reproduzca por prediccion (CLIENT_WEAPONS). Sin
+// prediccion el jugador local se quedaba sin animacion, sonido ni efectos del arma.
+#if CLIENT_WEAPONS
+#define WEAPON_EVENT_NOTHOST FEV_NOTHOST
+#else
+#define WEAPON_EVENT_NOTHOST 0
+#endif
+
 class CBasePlayer;
 extern int gmsgWeapPickup;
 
