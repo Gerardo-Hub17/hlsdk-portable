@@ -326,6 +326,8 @@ int __MsgFunc_AllowSpec( const char *pszName, int iSize, void *pbuf )
 }
  
 // This is called every time the DLL is loaded
+void EgonDiag_f( void );
+
 void CHud::Init( void )
 {
 	HOOK_MESSAGE( Logo );
@@ -341,6 +343,7 @@ void CHud::Init( void )
 	HOOK_COMMAND( "-commandmenu", CloseCommandMenu );
 	HOOK_COMMAND( "ForceCloseCommandMenu", ForceCloseCommandMenu );
 	HOOK_COMMAND( "special", InputPlayerSpecial );
+	gEngfuncs.pfnAddCommand( "wii_egon", EgonDiag_f );
 
 	HOOK_MESSAGE( ValClass );
 	HOOK_MESSAGE( TeamNames );

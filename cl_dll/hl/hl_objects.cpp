@@ -32,6 +32,31 @@ extern BEAM *pBeam2;
 extern TEMPENTITY *pFlare;	// Vit_amiN: egon's energy flare
 void HUD_GetLastOrg( float *org );
 
+// diagnostico del rayo del Gluon: se guarda en memoria y se muestra con "wii_egon"
+static struct
+{
+    int count;
+    vec3_t origin, angles, vecEnd, endpos, bsource, btarget, attach, porigin;
+    float fraction;
+    int allsolid, startsolid, ent;
+} egon_diag;
+
+void EgonDiag_f( void )
+{
+    gEngfuncs.Con_Printf( "wii_egon: actualizaciones=%d (0 = UpdateBeams nunca corrio)\n", egon_diag.count );
+    if( !egon_diag.count )
+        return;
+    gEngfuncs.Con_Printf( "origen usado  %.0f %.0f %.0f\n", egon_diag.origin[0], egon_diag.origin[1], egon_diag.origin[2] );
+    gEngfuncs.Con_Printf( "ent jugador   %.0f %.0f %.0f\n", egon_diag.porigin[0], egon_diag.porigin[1], egon_diag.porigin[2] );
+    gEngfuncs.Con_Printf( "angulos vista %.1f %.1f %.1f\n", egon_diag.angles[0], egon_diag.angles[1], egon_diag.angles[2] );
+    gEngfuncs.Con_Printf( "fin del trazo %.0f %.0f %.0f\n", egon_diag.vecEnd[0], egon_diag.vecEnd[1], egon_diag.vecEnd[2] );
+    gEngfuncs.Con_Printf( "impacto       %.0f %.0f %.0f frac=%.3f ent=%d allsolid=%d startsolid=%d\n",
+        egon_diag.endpos[0], egon_diag.endpos[1], egon_diag.endpos[2], egon_diag.fraction, egon_diag.ent, egon_diag.allsolid, egon_diag.startsolid );
+    gEngfuncs.Con_Printf( "attachment 1  %.0f %.0f %.0f\n", egon_diag.attach[0], egon_diag.attach[1], egon_diag.attach[2] );
+    gEngfuncs.Con_Printf( "rayo source   %.0f %.0f %.0f\n", egon_diag.bsource[0], egon_diag.bsource[1], egon_diag.bsource[2] );
+    gEngfuncs.Con_Printf( "rayo target   %.0f %.0f %.0f\n", egon_diag.btarget[0], egon_diag.btarget[1], egon_diag.btarget[2] );
+}
+
 void UpdateBeams( void )
 {
 	vec3_t forward, vecSrc, vecEnd, origin, angles, right, up;
@@ -75,6 +100,23 @@ void UpdateBeams( void )
 	gEngfuncs.pEventAPI->EV_PlayerTrace( vecSrc, vecEnd, PM_STUDIO_BOX, -1, &tr );
 
 	gEngfuncs.pEventAPI->EV_PopPMStates();
+
+	egon_diag.count++;
+	VectorCopy( origin, egon_diag.origin );
+	VectorCopy( pthisplayer->origin, egon_diag.porigin );
+	VectorCopy( angles, egon_diag.angles );
+	VectorCopy( vecEnd, egon_diag.vecEnd );
+	VectorCopy( tr.endpos, egon_diag.endpos );
+	VectorCopy( pthisplayer->attachment[0], egon_diag.attach );
+	egon_diag.fraction = tr.fraction;
+	egon_diag.allsolid = tr.allsolid;
+	egon_diag.startsolid = tr.startsolid;
+	egon_diag.ent = tr.ent;
+	if( pBeam )
+	{
+		VectorCopy( pBeam->source, egon_diag.bsource );
+		VectorCopy( pBeam->target, egon_diag.btarget );
+	}
 
 	if( pBeam )
 	{
