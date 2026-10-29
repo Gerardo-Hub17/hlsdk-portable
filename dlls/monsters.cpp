@@ -2035,6 +2035,7 @@ void CBaseMonster::MonsterInit( void )
 //=========================================================
 void CBaseMonster::MonsterInitThink( void )
 {
+	OGC_TIMED( "(ia) StartMonster" );
 	StartMonster();
 }
 

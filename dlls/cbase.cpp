@@ -21,6 +21,7 @@
 #include	"decals.h"
 #include	"gamerules.h"
 #include	"game.h"
+#include	"ogc_prof.h"
 
 bool g_fIsXash3D = false;
 
@@ -760,6 +761,7 @@ int CBaseEntity::DamageDecal( int bitsDamageType )
 // will keep a pointer to it after this call.
 CBaseEntity *CBaseEntity::Create( const char *szName, const Vector &vecOrigin, const Vector &vecAngles, edict_t *pentOwner )
 {
+	OGC_TIMED( "(ia) Create" );
 	edict_t	*pent;
 	CBaseEntity *pEntity;
 
