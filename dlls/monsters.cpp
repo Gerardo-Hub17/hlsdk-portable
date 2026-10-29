@@ -34,6 +34,7 @@
 #include "soundent.h"
 #include "gamerules.h"
 #include "game.h"
+#include "ogc_prof.h"
 
 #define MONSTER_CUT_CORNER_DIST		8 // 8 means the monster's bounding box is contained without the box of the node in WC
 
@@ -302,6 +303,7 @@ BOOL CBaseMonster::FValidateHintType( short sHint )
 //=========================================================
 void CBaseMonster::Look( int iDistance )
 {
+	OGC_TIMED( "(ia) Look" );
 	int iSighted = 0;
 
 	// DON'T let visibility information from last frame sit around!
@@ -1517,6 +1519,7 @@ int CBaseMonster::RouteClassify( int iMoveFlag )
 //=========================================================
 BOOL CBaseMonster::BuildRoute( const Vector &vecGoal, int iMoveFlag, CBaseEntity *pTarget )
 {
+	OGC_TIMED( "(ia) BuildRoute" );
 	float flDist;
 	Vector vecApex;
 	int iLocalMove;
@@ -1956,6 +1959,7 @@ BOOL CBaseMonster::ShouldAdvanceRoute( float flWaypointDist )
 
 void CBaseMonster::MoveExecute( CBaseEntity *pTargetEnt, const Vector &vecDir, float flInterval )
 {
+	OGC_TIMED( "(ia) MoveExecute" );
 	//float flYaw = UTIL_VecToYaw( m_Route[m_iRouteIndex].vecLocation - pev->origin );// build a yaw that points to the goal.
 	//WALK_MOVE( ENT( pev ), flYaw, m_flGroundSpeed * flInterval, WALKMOVE_NORMAL );
 	if( m_IdealActivity != m_movementActivity )
@@ -2208,6 +2212,7 @@ int CBaseMonster::IRelationship( CBaseEntity *pTarget )
 
 BOOL CBaseMonster::FindCover( Vector vecThreat, Vector vecViewOffset, float flMinDist, float flMaxDist )
 {
+	OGC_TIMED( "(ia) FindCover" );
 	int i;
 	int iMyHullIndex;
 	int iMyNode;
@@ -2398,6 +2403,7 @@ BOOL CBaseMonster::BuildNearestRoute( Vector vecThreat, Vector vecViewOffset, fl
 //=========================================================
 CBaseEntity *CBaseMonster::BestVisibleEnemy( void )
 {
+	OGC_TIMED( "(ia) BestVisibleEnemy" );
 	CBaseEntity	*pReturn;
 	CBaseEntity	*pNextEnt;
 	int		iNearest;
@@ -3094,6 +3100,7 @@ int CBaseMonster::CanPlaySequence( BOOL fDisregardMonsterState, int interruptLev
 
 BOOL CBaseMonster::FindLateralCover( const Vector &vecThreat, const Vector &vecViewOffset )
 {
+	OGC_TIMED( "(ia) FindLateralCover" );
 	TraceResult tr;
 	Vector	vecBestOnLeft;
 	Vector	vecBestOnRight;

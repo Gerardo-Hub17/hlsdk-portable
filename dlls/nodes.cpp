@@ -586,6 +586,7 @@ int CGraph::NextNodeInRoute( int iCurrentNode, int iDest, int iHull, int iCap )
 //=========================================================
 int CGraph::FindShortestPath( int *piPath, int iStart, int iDest, int iHull, int afCapMask )
 {
+	OGC_TIMED( "(ia) FindShortestPath" );
 	int iVisitNode;
 	int iCurrentNode;
 	int iNumPathNodes;
@@ -875,6 +876,7 @@ int CGraph::FindNearestNode( const Vector &vecOrigin,  CBaseEntity *pEntity )
 
 int CGraph::FindNearestNode( const Vector &vecOrigin, int afNodeTypes )
 {
+	OGC_TIMED( "(ia) FindNearestNode" );
 	int i;
 	TraceResult tr;
 
