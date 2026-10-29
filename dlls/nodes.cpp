@@ -23,6 +23,7 @@
 #include	"nodes.h"
 #include	"nodes_compat.h"
 #include	"animation.h"
+#include "ogc_prof.h"
 #include	"doors.h"
 #include	"byteswap.h"
 
