@@ -363,6 +363,50 @@ protected:
 	void SendMOTDToClient( edict_t *client );
 };
 
+
+//=========================================================
+// CHalfLifeCoop - campaign co-op (split screen): the single player maps
+// with up to four players. Player 1 decides the level changes, the others
+// come back near the closest living player when they die, everybody
+// regenerates and the inventory goes from level to level.
+//=========================================================
+class CHalfLifeCoop : public CHalfLifeMultiplay
+{
+public:
+	CHalfLifeCoop();
+
+	virtual void Think( void );
+	virtual void RefreshSkillData( void );
+	virtual BOOL IsDeathmatch( void ) { return FALSE; }
+	virtual BOOL IsCoOp( void ) { return TRUE; }
+	virtual const char *GetGameDescription( void ) { return "Half-Life Co-op"; }
+
+	virtual void InitHUD( CBasePlayer *pl );
+	virtual void PlayerSpawn( CBasePlayer *pPlayer );
+	virtual void PlayerKilled( CBasePlayer *pVictim, entvars_t *pKiller, entvars_t *pInflictor );
+	virtual edict_t *GetPlayerSpawnSpot( CBasePlayer *pPlayer );
+	virtual void ClientUserInfoChanged( CBasePlayer *pPlayer, char *infobuffer );
+
+	virtual BOOL ShouldAutoAim( CBasePlayer *pPlayer, edict_t *target );
+	virtual int PlayerRelationship( CBaseEntity *pPlayer, CBaseEntity *pTarget );
+
+	// the campaign items are not shared out again and again
+	virtual int WeaponShouldRespawn( CBasePlayerItem *pWeapon );
+	virtual float FlWeaponRespawnTime( CBasePlayerItem *pWeapon );
+	virtual BOOL CanHavePlayerItem( CBasePlayer *pPlayer, CBasePlayerItem *pItem );
+	virtual int ItemShouldRespawn( CItem *pItem );
+	virtual int AmmoShouldRespawn( CBasePlayerAmmo *pAmmo );
+	virtual float FlHealthChargerRechargeTime( void ) { return 0; }
+	virtual float FlHEVChargerRechargeTime( void ) { return 0; }
+	virtual int DeadPlayerWeapons( CBasePlayer *pPlayer ) { return GR_PLR_DROP_GUN_NO; }
+	virtual int DeadPlayerAmmo( CBasePlayer *pPlayer ) { return GR_PLR_DROP_AMMO_NO; }
+	virtual BOOL FAllowMonsters( void ) { return TRUE; }
+};
+
+// co-op helpers used by the rest of the game dll
+BOOL Coop_IsLeader( CBaseEntity *pPlayer );			// player 1, the only one that changes the level
+void Coop_BeforeChangeLevel( const char *nextmap );		// keeps the players' state for the next level
+
 bool IsPlayerBusting( CBaseEntity *pPlayer );
 BOOL BustingCanHaveItem( CBasePlayer *pPlayer, CBaseEntity *pItem );
 

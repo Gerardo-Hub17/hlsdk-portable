@@ -317,6 +317,13 @@ CGameRules *InstallGameRules( void )
 	SERVER_COMMAND( "exec game.cfg\n" );
 	SERVER_EXECUTE();
 
+	if( gpGlobals->coop && gpGlobals->maxClients > 1 )
+	{
+		// campaign co-op (split screen)
+		g_teamplay = 0;
+		return new CHalfLifeCoop;
+	}
+
 	if( !gpGlobals->deathmatch )
 	{
 		// generic half-life

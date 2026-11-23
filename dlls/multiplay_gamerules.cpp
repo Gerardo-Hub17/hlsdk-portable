@@ -1872,3 +1872,610 @@ void CMultiplayBusters::PlayerGotWeapon( CBasePlayer *pPlayer, CBasePlayerItem *
 	pPlayer->pev->rendercolor = Vector( 0, 75, 250 );
 	pPlayer->m_rgAmmo[pWeapon->PrimaryAmmoIndex()] = pPlayer->ammo_uranium = 100;
 }
+
+//*********************************************************
+// Campaign co-op (split screen)
+//
+// The single player maps played by up to four players. The rules are the
+// multiplayer ones (clients, prediction and weapons agree) with these changes:
+//  - player 1 is the leader: only he changes the level (triggers.cpp)
+//  - a player that dies comes back near the closest living player after a
+//    few seconds; the level restarts only when everybody is dead
+//  - the players regenerate (all the way in at most 5 seconds after the last
+//    hit), the monsters and the other players hurt them, they hurt themselves
+//  - the health, armor, weapons and ammo go from level to level and are kept
+//    in the cvars coop_p1 to coop_p4; the engine writes them to its co-op save
+//    file (command coop_save) and puts them back with coop_load
+//  - everybody is a Freeman clone, in a different color
+//*********************************************************
+#define COOP_MAX		4
+#define COOP_BLOB		768
+#define COOP_REGEN_DELAY	1.5f	// seconds without being hit before the regeneration starts
+#define COOP_REGEN_TIME		3.5f	// seconds it takes to go from 0 to 100 (delay + this <= 5)
+#define COOP_RESPAWN_DELAY	3.0f	// seconds a dead player waits
+#define COOP_ALLDEAD_DELAY	4.0f	// seconds before the level restarts when everybody is dead
+
+extern void respawn( entvars_t *pev, BOOL fCopyCorpse );	// client.cpp
+
+static char g_szCoopStart[COOP_MAX][COOP_BLOB];	// what each player had when this level began
+static BOOL g_fCoopFresh[COOP_MAX];			// that state has not been given yet
+static char g_szCoopDeath[COOP_MAX][COOP_BLOB];	// what a player had when he died
+static BOOL g_fCoopDead[COOP_MAX];
+static float g_flCoopLastAlive;
+static BOOL g_fCoopRestarting;
+
+// Freeman in four hues (HL hue scale 0 to 255): orange, blue, green, purple
+static const char *g_szCoopHue[COOP_MAX] = { "20", "170", "85", "215" };
+
+static void Coop_Copy( char *dst, const char *src, int size )
+{
+	strncpy( dst, src, size - 1 );
+	dst[size - 1] = 0;
+}
+
+static CBasePlayer *Coop_Player( int index )
+{
+	CBaseEntity *pEnt = UTIL_PlayerByIndex( index );
+
+	if( !pEnt || !pEnt->IsPlayer() )
+		return NULL;
+
+	if( !( pEnt->pev->flags & FL_CLIENT ) )
+		return NULL;
+
+	return (CBasePlayer *)pEnt;
+}
+
+BOOL Coop_IsLeader( CBaseEntity *pPlayer )
+{
+	return pPlayer && pPlayer->edict() && ENTINDEX( pPlayer->edict() ) == 1;
+}
+
+static int Coop_Slot( CBasePlayer *pPlayer )
+{
+	int slot = ENTINDEX( pPlayer->edict() ) - 1;
+
+	return ( slot >= 0 && slot < COOP_MAX ) ? slot : -1;
+}
+
+// the player looks like Freeman, in the color of his slot
+static void Coop_Look( CBasePlayer *pPlayer, char *infobuffer )
+{
+	const int slot = Coop_Slot( pPlayer );
+	const int index = ENTINDEX( pPlayer->edict() );
+
+	if( slot < 0 || !infobuffer )
+		return;
+
+	if( !FStrEq( g_engfuncs.pfnInfoKeyValue( infobuffer, "model" ), "gordon" ) )
+		g_engfuncs.pfnSetClientKeyValue( index, infobuffer, "model", "gordon" );
+
+	if( !FStrEq( g_engfuncs.pfnInfoKeyValue( infobuffer, "topcolor" ), g_szCoopHue[slot] ) )
+		g_engfuncs.pfnSetClientKeyValue( index, infobuffer, "topcolor", g_szCoopHue[slot] );
+
+	if( !FStrEq( g_engfuncs.pfnInfoKeyValue( infobuffer, "bottomcolor" ), g_szCoopHue[slot] ) )
+		g_engfuncs.pfnSetClientKeyValue( index, infobuffer, "bottomcolor", g_szCoopHue[slot] );
+}
+
+/*
+Snapshot of what a player carries, as text:
+  H<health> A<armor> S<suit 0/1> a<ammo index>=<count> ... w<classname>=<clip> ... c<active weapon>
+*/
+static void Coop_Snapshot( CBasePlayer *pPlayer, char *out, int size )
+{
+	int len;
+
+	len = safe_snprintf( out, size, "H%d A%d S%d", (int)pPlayer->pev->health, (int)pPlayer->pev->armorvalue,
+		( pPlayer->pev->weapons & ( 1 << WEAPON_SUIT ) ) ? 1 : 0 );
+
+	for( int i = 1; i < MAX_AMMO_SLOTS && len < size - 24; i++ )
+	{
+		if( pPlayer->m_rgAmmo[i] > 0 )
+			len += safe_snprintf( out + len, size - len, " a%d=%d", i, pPlayer->m_rgAmmo[i] );
+	}
+
+	for( int i = 0; i < MAX_ITEM_TYPES; i++ )
+	{
+		CBasePlayerItem *pItem = pPlayer->m_rgpPlayerItems[i];
+
+		while( pItem && len < size - 48 )
+		{
+			CBasePlayerItem *pW = pItem->GetWeaponPtr();
+			int clip = pW ? ( (CBasePlayerWeapon *)pW )->m_iClip : -1;
+
+			if( pItem->pev->classname )
+				len += safe_snprintf( out + len, size - len, " w%s=%d", STRING( pItem->pev->classname ), clip );
+
+			pItem = pItem->m_pNext;
+		}
+	}
+
+	if( pPlayer->m_pActiveItem && pPlayer->m_pActiveItem->pev->classname && len < size - 48 )
+		safe_snprintf( out + len, size - len, " c%s", STRING( pPlayer->m_pActiveItem->pev->classname ) );
+}
+
+// puts a snapshot back (health only for the level to level carry)
+static void Coop_Apply( CBasePlayer *pPlayer, const char *blob, BOOL withHealth )
+{
+	char buf[COOP_BLOB], active[48] = "";
+	struct { char name[40]; int clip; } weapons[24];
+	int ammo[MAX_AMMO_SLOTS], nweapons = 0;
+	char *tok;
+
+	if( !blob || !blob[0] )
+		return;
+
+	Coop_Copy( buf, blob, sizeof( buf ) );
+	memset( ammo, 0, sizeof( ammo ) );
+
+	for( tok = strtok( buf, " " ); tok; tok = strtok( NULL, " " ) )
+	{
+		switch( tok[0] )
+		{
+		case 'H':
+			if( withHealth )
+				pPlayer->pev->health = Q_max( 1, Q_min( 100, atoi( tok + 1 ) ) );
+			break;
+		case 'A':
+			pPlayer->pev->armorvalue = Q_max( 0, Q_min( 100, atoi( tok + 1 ) ) );
+			break;
+		case 'S':
+			if( atoi( tok + 1 ) )
+				pPlayer->pev->weapons |= ( 1 << WEAPON_SUIT );
+			break;
+		case 'a':
+		{
+			int idx = atoi( tok + 1 );
+			const char *eq = strchr( tok, '=' );
+
+			if( eq && idx > 0 && idx < MAX_AMMO_SLOTS )
+				ammo[idx] = atoi( eq + 1 );
+			break;
+		}
+		case 'w':
+		{
+			char *eq = strchr( tok, '=' );
+
+			if( eq && nweapons < 24 && ( eq - tok - 1 ) < (int)sizeof( weapons[0].name ) )
+			{
+				*eq = 0;
+				Coop_Copy( weapons[nweapons].name, tok + 1, sizeof( weapons[0].name ) );
+				weapons[nweapons].clip = atoi( eq + 1 );
+				nweapons++;
+			}
+			break;
+		}
+		case 'c':
+			Coop_Copy( active, tok + 1, sizeof( active ) );
+			break;
+		}
+	}
+
+	// the weapons come with their own starting ammo: the real one is put after them
+	{
+		const int oldswitch = pPlayer->m_iAutoWepSwitch;
+
+		pPlayer->m_iAutoWepSwitch = 1;
+
+		for( int i = 0; i < nweapons; i++ )
+			pPlayer->GiveNamedItem( weapons[i].name );
+
+		pPlayer->m_iAutoWepSwitch = oldswitch;
+	}
+
+	for( int i = 1; i < MAX_AMMO_SLOTS; i++ )
+	{
+		if( ammo[i] > 0 )
+			pPlayer->m_rgAmmo[i] = ammo[i];
+	}
+
+	for( int n = 0; n < nweapons; n++ )
+	{
+		for( int i = 0; i < MAX_ITEM_TYPES; i++ )
+		{
+			for( CBasePlayerItem *pItem = pPlayer->m_rgpPlayerItems[i]; pItem; pItem = pItem->m_pNext )
+			{
+				CBasePlayerItem *pW = pItem->GetWeaponPtr();
+
+				if( pW && pItem->pev->classname && FStrEq( STRING( pItem->pev->classname ), weapons[n].name ) && weapons[n].clip >= 0 )
+					( (CBasePlayerWeapon *)pW )->m_iClip = weapons[n].clip;
+			}
+		}
+	}
+
+	if( active[0] )
+		pPlayer->SelectItem( active );
+}
+
+// the state each player carries is kept in the cvars so the engine can write it to the co-op save
+static void Coop_StoreCvar( int slot, const char *blob )
+{
+	char name[16];
+
+	safe_snprintf( name, sizeof( name ), "coop_p%d", slot + 1 );
+	CVAR_SET_STRING( name, blob ? blob : "" );
+}
+
+static void Coop_LoadCvars( void )
+{
+	for( int i = 0; i < COOP_MAX; i++ )
+	{
+		char name[16];
+		const char *value;
+
+		safe_snprintf( name, sizeof( name ), "coop_p%d", i + 1 );
+		value = CVAR_GET_STRING( name );
+
+		g_szCoopStart[i][0] = 0;
+		g_fCoopFresh[i] = FALSE;
+		g_fCoopDead[i] = FALSE;
+
+		if( value && value[0] )
+		{
+			Coop_Copy( g_szCoopStart[i], value, sizeof( g_szCoopStart[i] ) );
+			g_fCoopFresh[i] = TRUE;
+		}
+	}
+}
+
+// called from trigger_changelevel: the players' state for the next level, and the co-op save
+void Coop_BeforeChangeLevel( const char *nextmap )
+{
+	char blob[COOP_BLOB];
+
+	if( !g_pGameRules || !g_pGameRules->IsCoOp() )
+		return;
+
+	for( int i = 0; i < COOP_MAX; i++ )
+	{
+		CBasePlayer *pPlayer = Coop_Player( i + 1 );
+
+		if( pPlayer && pPlayer->IsAlive() )
+		{
+			Coop_Snapshot( pPlayer, blob, sizeof( blob ) );
+			Coop_StoreCvar( i, blob );
+		}
+		else if( pPlayer )
+		{
+			// dead at the time: he goes on with what he began the level with
+			Coop_StoreCvar( i, g_szCoopStart[i] );
+		}
+		else Coop_StoreCvar( i, "" );
+	}
+
+	CVAR_SET_STRING( "coop_map", nextmap ? nextmap : "" );
+	SERVER_COMMAND( "coop_save\n" );
+	SERVER_EXECUTE();
+}
+
+CHalfLifeCoop::CHalfLifeCoop() : CHalfLifeMultiplay()
+{
+	g_fCoopRestarting = FALSE;
+	g_flCoopLastAlive = gpGlobals->time;
+	Coop_LoadCvars();
+
+	// the base class loaded the deathmatch skill values
+	RefreshSkillData();
+}
+
+void CHalfLifeCoop::RefreshSkillData( void )
+{
+	// the single player values
+	CGameRules::RefreshSkillData();
+}
+
+void CHalfLifeCoop::InitHUD( CBasePlayer *pl )
+{
+	// like the multiplayer one, without the message of the day
+	UTIL_ClientPrintAll( HUD_PRINTNOTIFY, UTIL_VarArgs( "%s has joined the game\n",
+		( pl->pev->netname && ( STRING( pl->pev->netname ) )[0] != 0 ) ? STRING( pl->pev->netname ) : "unconnected" ) );
+
+	UpdateGameMode( pl );
+
+	MESSAGE_BEGIN( MSG_ALL, gmsgScoreInfo );
+		WRITE_BYTE( ENTINDEX( pl->edict() ) );
+		WRITE_SHORT( (int)pl->pev->frags );
+		WRITE_SHORT( pl->m_iDeaths );
+		WRITE_SHORT( 0 );
+		WRITE_SHORT( 0 );
+	MESSAGE_END();
+
+	for( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *plr = (CBasePlayer *)UTIL_PlayerByIndex( i );
+
+		if( plr )
+		{
+			MESSAGE_BEGIN( MSG_ONE, gmsgScoreInfo, NULL, pl->edict() );
+				WRITE_BYTE( i );
+				WRITE_SHORT( (int)plr->pev->frags );
+				WRITE_SHORT( plr->m_iDeaths );
+				WRITE_SHORT( 0 );
+				WRITE_SHORT( 0 );
+			MESSAGE_END();
+		}
+	}
+}
+
+void CHalfLifeCoop::ClientUserInfoChanged( CBasePlayer *pPlayer, char *infobuffer )
+{
+	CGameRules::ClientUserInfoChanged( pPlayer, infobuffer );
+	Coop_Look( pPlayer, infobuffer );
+}
+
+BOOL CHalfLifeCoop::ShouldAutoAim( CBasePlayer *pPlayer, edict_t *target )
+{
+	CBaseEntity *pTarget = CBaseEntity::Instance( target );
+
+	// no autoaim on a partner
+	if( pTarget && pTarget->IsPlayer() )
+		return FALSE;
+
+	return TRUE;
+}
+
+int CHalfLifeCoop::PlayerRelationship( CBaseEntity *pPlayer, CBaseEntity *pTarget )
+{
+	if( pPlayer && pTarget && pPlayer->IsPlayer() && pTarget->IsPlayer() )
+		return GR_TEAMMATE;
+
+	return GR_NOTTEAMMATE;
+}
+
+// the map's weapons stay where they are so everybody can take one
+int CHalfLifeCoop::WeaponShouldRespawn( CBasePlayerItem *pWeapon )
+{
+	if( pWeapon->pev->spawnflags & SF_NORESPAWN )
+		return GR_WEAPON_RESPAWN_NO;
+
+	return GR_WEAPON_RESPAWN_YES;
+}
+
+float CHalfLifeCoop::FlWeaponRespawnTime( CBasePlayerItem *pWeapon )
+{
+	if( !( pWeapon->iFlags() & ITEM_FLAG_LIMITINWORLD ) )
+		return gpGlobals->time;
+
+	return gpGlobals->time + WEAPON_RESPAWN_TIME;
+}
+
+BOOL CHalfLifeCoop::CanHavePlayerItem( CBasePlayer *pPlayer, CBasePlayerItem *pItem )
+{
+	if( !( pItem->iFlags() & ITEM_FLAG_LIMITINWORLD ) )
+	{
+		for( int i = 0; i < MAX_ITEM_TYPES; i++ )
+		{
+			for( CBasePlayerItem *it = pPlayer->m_rgpPlayerItems[i]; it; it = it->m_pNext )
+			{
+				if( it->m_iId == pItem->m_iId )
+					return FALSE;
+			}
+		}
+	}
+
+	return CGameRules::CanHavePlayerItem( pPlayer, pItem );
+}
+
+int CHalfLifeCoop::ItemShouldRespawn( CItem *pItem )
+{
+	return GR_ITEM_RESPAWN_NO;
+}
+
+int CHalfLifeCoop::AmmoShouldRespawn( CBasePlayerAmmo *pAmmo )
+{
+	return GR_AMMO_RESPAWN_NO;
+}
+
+// the closest living player to a point, other than "except"
+static CBasePlayer *Coop_Nearest( const Vector &origin, CBasePlayer *except )
+{
+	CBasePlayer *pBest = NULL;
+	float best = 0;
+
+	for( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = Coop_Player( i );
+
+		if( !pPlayer || pPlayer == except || !pPlayer->IsAlive() )
+			continue;
+
+		float d = ( pPlayer->pev->origin - origin ).Length();
+
+		if( !pBest || d < best )
+		{
+			pBest = pPlayer;
+			best = d;
+		}
+	}
+
+	return pBest;
+}
+
+edict_t *CHalfLifeCoop::GetPlayerSpawnSpot( CBasePlayer *pPlayer )
+{
+	CBasePlayer *pNear = Coop_Nearest( pPlayer->pev->origin, pPlayer );
+
+	// nobody else is in the game yet: the level's start
+	if( !pNear )
+		return CHalfLifeMultiplay::GetPlayerSpawnSpot( pPlayer );
+
+	const int slot = Coop_Slot( pPlayer ) < 0 ? 0 : Coop_Slot( pPlayer );
+	Vector spot = pNear->pev->origin;
+	BOOL found = FALSE;
+	static const float rings[] = { 56, 80, 112 };
+
+	for( int r = 0; r < 3 && !found; r++ )
+	{
+		for( int k = 0; k < 8 && !found; k++ )
+		{
+			const float ang = ( ( k + slot * 2 ) % 8 ) * 45.0f * 0.01745329f;
+			Vector pos = pNear->pev->origin + Vector( cos( ang ) * rings[r], sin( ang ) * rings[r], 0 );
+			TraceResult tr;
+
+			// the way there has to be free and the player has to fit
+			UTIL_TraceHull( pNear->pev->origin, pos, dont_ignore_monsters, human_hull, pNear->edict(), &tr );
+
+			if( tr.flFraction < 1.0f || tr.fStartSolid || tr.fAllSolid )
+				continue;
+
+			UTIL_TraceHull( pos, pos, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+
+			if( tr.fStartSolid || tr.fAllSolid )
+				continue;
+
+			spot = pos;
+			found = TRUE;
+		}
+	}
+
+	pPlayer->pev->origin = spot + Vector( 0, 0, 1 );
+	pPlayer->pev->v_angle = g_vecZero;
+	pPlayer->pev->velocity = g_vecZero;
+	pPlayer->pev->angles = pNear->pev->angles;
+	pPlayer->pev->punchangle = g_vecZero;
+	pPlayer->pev->fixangle = TRUE;
+
+	return pNear->edict();
+}
+
+void CHalfLifeCoop::PlayerSpawn( CBasePlayer *pPlayer )
+{
+	const int slot = Coop_Slot( pPlayer );
+	char blob[COOP_BLOB];
+	BOOL given = FALSE;
+
+	Coop_Look( pPlayer, g_engfuncs.pfnGetInfoKeyBuffer( pPlayer->edict() ) );
+
+	if( slot >= 0 && g_fCoopDead[slot] )
+	{
+		// he died: back with what he had, at full health
+		g_fCoopDead[slot] = FALSE;
+		Coop_Apply( pPlayer, g_szCoopDeath[slot], FALSE );
+		given = TRUE;
+	}
+	else if( slot >= 0 && g_fCoopFresh[slot] )
+	{
+		// the state the previous level (or a loaded save) left for him
+		g_fCoopFresh[slot] = FALSE;
+		Coop_Apply( pPlayer, g_szCoopStart[slot], TRUE );
+		given = TRUE;
+	}
+	else
+	{
+		// joins late: the same as the closest partner has
+		CBasePlayer *pNear = Coop_Nearest( pPlayer->pev->origin, pPlayer );
+
+		if( pNear )
+		{
+			Coop_Snapshot( pNear, blob, sizeof( blob ) );
+			Coop_Apply( pPlayer, blob, FALSE );
+			given = TRUE;
+		}
+	}
+
+	if( !given )
+	{
+		// the equipment the map hands out, if it has any
+		CBaseEntity *pEquip = NULL;
+
+		while( ( pEquip = UTIL_FindEntityByClassname( pEquip, "game_player_equip" ) ) )
+			pEquip->Touch( pPlayer );
+	}
+
+	// what he has now is what a restart of the level gives back
+	if( slot >= 0 && !g_szCoopStart[slot][0] )
+		Coop_Snapshot( pPlayer, g_szCoopStart[slot], sizeof( g_szCoopStart[slot] ) );
+}
+
+void CHalfLifeCoop::PlayerKilled( CBasePlayer *pVictim, entvars_t *pKiller, entvars_t *pInflictor )
+{
+	const int slot = Coop_Slot( pVictim );
+
+	if( slot >= 0 )
+	{
+		Coop_Snapshot( pVictim, g_szCoopDeath[slot], sizeof( g_szCoopDeath[slot] ) );
+		g_fCoopDead[slot] = TRUE;
+	}
+
+	CHalfLifeMultiplay::PlayerKilled( pVictim, pKiller, pInflictor );
+}
+
+void CHalfLifeCoop::Think( void )
+{
+	static float lastHealth[COOP_MAX], lastHurt[COOP_MAX], deadSince[COOP_MAX];
+	int alive = 0, total = 0;
+
+#if !NO_VOICEGAMEMGR
+	g_VoiceGameMgr.Update( gpGlobals->frametime );
+#endif
+
+	for( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = Coop_Player( i );
+		const int slot = i - 1;
+
+		if( !pPlayer || slot >= COOP_MAX )
+			continue;
+
+		total++;
+
+		if( pPlayer->IsAlive() )
+		{
+			alive++;
+			deadSince[slot] = 0;
+
+			if( pPlayer->pev->health < lastHealth[slot] )
+				lastHurt[slot] = gpGlobals->time;
+
+			if( pPlayer->pev->health < 100 && gpGlobals->time > lastHurt[slot] + COOP_REGEN_DELAY )
+			{
+				pPlayer->pev->health += gpGlobals->frametime * ( 100.0f / COOP_REGEN_TIME );
+
+				if( pPlayer->pev->health > 100 )
+					pPlayer->pev->health = 100;
+			}
+
+			lastHealth[slot] = pPlayer->pev->health;
+		}
+		else
+		{
+			lastHealth[slot] = 100;
+			lastHurt[slot] = 0;
+
+			if( deadSince[slot] == 0 )
+				deadSince[slot] = gpGlobals->time;
+		}
+	}
+
+	if( alive > 0 )
+	{
+		g_flCoopLastAlive = gpGlobals->time;
+
+		// the dead come back near the closest living player
+		for( int i = 1; i <= gpGlobals->maxClients; i++ )
+		{
+			CBasePlayer *pPlayer = Coop_Player( i );
+			const int slot = i - 1;
+
+			if( !pPlayer || slot >= COOP_MAX || pPlayer->IsAlive() || deadSince[slot] == 0 )
+				continue;
+
+			if( pPlayer->pev->deadflag >= DEAD_DEAD && gpGlobals->time > deadSince[slot] + COOP_RESPAWN_DELAY )
+			{
+				deadSince[slot] = 0;
+				pPlayer->pev->button = 0;
+				respawn( pPlayer->pev, !( pPlayer->m_afPhysicsFlags & PFLAG_OBSERVER ) );
+			}
+		}
+	}
+	else if( total > 0 && !g_fCoopRestarting && gpGlobals->time > g_flCoopLastAlive + COOP_ALLDEAD_DELAY )
+	{
+		// everybody is dead: the level starts again with what each one began it with
+		g_fCoopRestarting = TRUE;
+
+		for( int i = 0; i < COOP_MAX; i++ )
+			Coop_StoreCvar( i, g_szCoopStart[i] );
+
+		SERVER_COMMAND( UTIL_VarArgs( "changelevel %s\n", STRING( gpGlobals->mapname ) ) );
+	}
+}

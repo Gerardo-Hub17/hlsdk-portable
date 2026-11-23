@@ -1496,6 +1496,7 @@ void CChangeLevel::ChangeLevelNow( CBaseEntity *pActivator )
 	}
 	//ALERT( at_console, "Level touches %d levels\n", ChangeList( levels, 16 ) );
 	ALERT( at_console, "CHANGE LEVEL: %s %s\n", st_szNextMap, st_szNextSpot );
+	Coop_BeforeChangeLevel( st_szNextMap );
 	CHANGE_LEVEL( st_szNextMap, st_szNextSpot );
 }
 
@@ -1505,6 +1506,10 @@ void CChangeLevel::ChangeLevelNow( CBaseEntity *pActivator )
 void CChangeLevel::TouchChangeLevel( CBaseEntity *pOther )
 {
 	if( !pOther->IsPlayer() )
+		return;
+
+	// co-op: only player 1 decides when the level changes
+	if( g_pGameRules->IsCoOp() && !Coop_IsLeader( pOther ) )
 		return;
 
 	ChangeLevelNow( pOther );
