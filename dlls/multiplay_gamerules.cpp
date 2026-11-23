@@ -2291,6 +2291,19 @@ static CBasePlayer *Coop_Nearest( const Vector &origin, CBasePlayer *except )
 	return pBest;
 }
 
+// what is under a point: the world or the entity that carries the player (a tram, a lift)
+static edict_t *Coop_FloorUnder( const Vector &pos, edict_t *ignore )
+{
+	TraceResult tr;
+
+	UTIL_TraceLine( pos, pos - Vector( 0, 0, 96 ), dont_ignore_monsters, ignore, &tr );
+
+	if( tr.flFraction >= 1.0f )
+		return NULL;	// nothing to stand on (outside a vehicle, over a pit)
+
+	return tr.pHit ? tr.pHit : INDEXENT( 0 );
+}
+
 edict_t *CHalfLifeCoop::GetPlayerSpawnSpot( CBasePlayer *pPlayer )
 {
 	CBasePlayer *pNear = Coop_Nearest( pPlayer->pev->origin, pPlayer );
@@ -2302,29 +2315,40 @@ edict_t *CHalfLifeCoop::GetPlayerSpawnSpot( CBasePlayer *pPlayer )
 	const int slot = Coop_Slot( pPlayer ) < 0 ? 0 : Coop_Slot( pPlayer );
 	Vector spot = pNear->pev->origin;
 	BOOL found = FALSE;
-	static const float rings[] = { 56, 80, 112 };
+	static const float rings[] = { 40, 56, 80, 112 };
 
-	for( int r = 0; r < 3 && !found; r++ )
+	// the spot has to be on what the partner stands on: in the tram of the first level
+	// a place beyond the cabin's walls would leave the player on the tracks
+	edict_t *pFloor = Coop_FloorUnder( pNear->pev->origin, pNear->edict() );
+
+	for( int pass = 0; pass < 2 && !found; pass++ )
 	{
-		for( int k = 0; k < 8 && !found; k++ )
+		for( int r = 0; r < 4 && !found; r++ )
 		{
-			const float ang = ( ( k + slot * 2 ) % 8 ) * 45.0f * 0.01745329f;
-			Vector pos = pNear->pev->origin + Vector( cos( ang ) * rings[r], sin( ang ) * rings[r], 0 );
-			TraceResult tr;
+			for( int k = 0; k < 8 && !found; k++ )
+			{
+				const float ang = ( ( k + slot * 2 ) % 8 ) * 45.0f * 0.01745329f;
+				Vector pos = pNear->pev->origin + Vector( cos( ang ) * rings[r], sin( ang ) * rings[r], 0 );
+				TraceResult tr;
 
-			// the way there has to be free and the player has to fit
-			UTIL_TraceHull( pNear->pev->origin, pos, dont_ignore_monsters, human_hull, pNear->edict(), &tr );
+				// the way there has to be free and the player has to fit
+				UTIL_TraceHull( pNear->pev->origin, pos, dont_ignore_monsters, human_hull, pNear->edict(), &tr );
 
-			if( tr.flFraction < 1.0f || tr.fStartSolid || tr.fAllSolid )
-				continue;
+				if( tr.flFraction < 1.0f || tr.fStartSolid || tr.fAllSolid )
+					continue;
 
-			UTIL_TraceHull( pos, pos, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+				UTIL_TraceHull( pos, pos, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
 
-			if( tr.fStartSolid || tr.fAllSolid )
-				continue;
+				if( tr.fStartSolid || tr.fAllSolid )
+					continue;
 
-			spot = pos;
-			found = TRUE;
+				// first pass: only where the partner's floor is; second: anywhere free
+				if( pass == 0 && pFloor && Coop_FloorUnder( pos, pPlayer->edict() ) != pFloor )
+					continue;
+
+				spot = pos;
+				found = TRUE;
+			}
 		}
 	}
 
