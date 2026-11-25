@@ -1194,6 +1194,8 @@ void CFuncTrackTrain::Next( void )
 			// Fire the pass target if there is one
 			if( pFire->pev->message )
 			{
+				if( gpGlobals->coop )
+					ALERT( at_console, "[COOP] train passes '%s' and fires '%s' (t=%.1f)\n", STRING( pFire->pev->targetname ), STRING( pFire->pev->message ), gpGlobals->time );
 				FireTargets( STRING( pFire->pev->message ), this, this, USE_TOGGLE, 0 );
 				if( FBitSet( pFire->pev->spawnflags, SF_PATH_FIREONCE ) )
 					pFire->pev->message = 0;
@@ -1284,7 +1286,11 @@ void CFuncTrackTrain::DeadEnd( void )
 	{
 		ALERT( at_aiconsole, "at %s\n", STRING( pTrack->pev->targetname ) );
 		if( pTrack->pev->netname )
+		{
+			if( gpGlobals->coop )
+				ALERT( at_console, "[COOP] train stops at '%s' and fires '%s' (t=%.1f)\n", STRING( pTrack->pev->targetname ), STRING( pTrack->pev->netname ), gpGlobals->time );
 			FireTargets( STRING( pTrack->pev->netname ), this, this, USE_TOGGLE, 0 );
+		}
 	}
 	else
 		ALERT( at_aiconsole, "\n" );

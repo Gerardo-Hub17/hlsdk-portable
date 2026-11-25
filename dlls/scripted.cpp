@@ -35,6 +35,10 @@
 #include "schedule.h"
 #include "scripted.h"
 #include "defaultai.h"
+#include "gamerules.h"
+
+// scripted events of the campaign in co-op: written to the log (xash_debug.log) to find out which one stops
+#define COOP_LOG( ... ) do { if( g_pGameRules && g_pGameRules->IsCoOp() ) ALERT( at_console, __VA_ARGS__ ); } while( 0 )
 
 /*
 classname "scripted_sequence"
@@ -176,6 +180,8 @@ void CCineMonster::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 	CBaseEntity *pEntity = m_hTargetEnt;
 	CBaseMonster *pTarget = NULL;
 
+	COOP_LOG( "[COOP] script '%s' used (monster '%s', t=%.1f)\n", STRING( pev->targetname ), STRING( m_iszEntity ), gpGlobals->time );
+
 	if( pEntity )
 		pTarget = pEntity->MyMonsterPointer();
 
@@ -278,7 +284,8 @@ int CCineMonster::FindEntity( void )
 				m_hTargetEnt = pTarget;
 				return TRUE;
 			}
-			ALERT( at_console, "Found %s, but can't play!\n", STRING( m_iszEntity ) );
+			ALERT( at_console, "Found %s, but can't play! (state %d, ideal %d, cine %s, alive %d)\n", STRING( m_iszEntity ),
+				(int)pTarget->m_MonsterState, (int)pTarget->m_IdealMonsterState, pTarget->m_pCine ? "yes" : "no", (int)pTarget->IsAlive() );
 		}
 		pentTarget = FIND_ENTITY_BY_TARGETNAME( pentTarget, STRING( m_iszEntity ) );
 		pTarget = NULL;
@@ -460,11 +467,13 @@ void CCineMonster::CineThink( void )
 	if( FindEntity() )
 	{
 		PossessEntity();
+		COOP_LOG( "[COOP] script '%s' using monster '%s'\n", STRING( pev->targetname ), STRING( m_iszEntity ) );
 		ALERT( at_aiconsole, "script \"%s\" using monster \"%s\"\n", STRING( pev->targetname ), STRING( m_iszEntity ) );
 	}
 	else
 	{
 		CancelScript();
+		COOP_LOG( "[COOP] script '%s' can't find monster '%s'\n", STRING( pev->targetname ), STRING( m_iszEntity ) );
 		ALERT( at_aiconsole, "script \"%s\" can't find monster \"%s\"\n", STRING( pev->targetname ), STRING( m_iszEntity ) );
 		pev->nextthink = gpGlobals->time + 1.0f;
 	}
