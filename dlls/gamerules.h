@@ -405,6 +405,10 @@ public:
 
 // co-op helpers used by the rest of the game dll
 BOOL Coop_IsLeader( CBaseEntity *pPlayer );			// player 1, the only one that changes the level
+// co-op trace written to the engine console (and so to xash_debug.log) whatever "developer" is;
+// ALERT( at_console ) is dropped by the engine with developer 0. It does nothing outside co-op
+// and stops after a few hundred lines per map.
+void Coop_Log( const char *fmt, ... );
 void Coop_BeforeChangeLevel( const char *nextmap );		// keeps the players' state for the next level
 
 bool IsPlayerBusting( CBaseEntity *pPlayer );

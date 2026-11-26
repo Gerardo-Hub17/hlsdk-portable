@@ -38,7 +38,7 @@
 #include "gamerules.h"
 
 // scripted events of the campaign in co-op: written to the log (xash_debug.log) to find out which one stops
-#define COOP_LOG( ... ) do { if( g_pGameRules && g_pGameRules->IsCoOp() ) ALERT( at_console, __VA_ARGS__ ); } while( 0 )
+#define COOP_LOG Coop_Log
 
 /*
 classname "scripted_sequence"
@@ -149,6 +149,8 @@ void CCineMonster::Spawn( void )
 		m_interruptable = FALSE;
 	else
 		m_interruptable = TRUE;
+
+	COOP_LOG( "[COOP] scripted_sequence '%s' for monster '%s' (idle '%s', flags %d)\n", STRING( pev->targetname ), STRING( m_iszEntity ), STRING( m_iszIdle ), pev->spawnflags );
 }
 
 //=========================================================
@@ -284,7 +286,8 @@ int CCineMonster::FindEntity( void )
 				m_hTargetEnt = pTarget;
 				return TRUE;
 			}
-			ALERT( at_console, "Found %s, but can't play! (state %d, ideal %d, cine %s, alive %d)\n", STRING( m_iszEntity ),
+			ALERT( at_console, "Found %s, but can't play!\n", STRING( m_iszEntity ));
+			COOP_LOG( "[COOP] script '%s': found '%s' but it can't play (state %d, ideal %d, cine %s, alive %d)\n", STRING( pev->targetname ), STRING( m_iszEntity ),
 				(int)pTarget->m_MonsterState, (int)pTarget->m_IdealMonsterState, pTarget->m_pCine ? "yes" : "no", (int)pTarget->IsAlive() );
 		}
 		pentTarget = FIND_ENTITY_BY_TARGETNAME( pentTarget, STRING( m_iszEntity ) );

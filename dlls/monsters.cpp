@@ -1987,6 +1987,9 @@ void CBaseMonster::MoveExecute( CBaseEntity *pTargetEnt, const Vector &vecDir, f
 //=========================================================
 void CBaseMonster::MonsterInit( void )
 {
+	Coop_Log( "[COOP] monster %s '%s' at %d %d %d (allowed %d)\n", STRING( pev->classname ), STRING( pev->targetname ),
+		(int)pev->origin.x, (int)pev->origin.y, (int)pev->origin.z, (int)g_pGameRules->FAllowMonsters() );
+
 	if( !g_pGameRules->FAllowMonsters() )
 	{
 		pev->flags |= FL_KILLME;		// Post this because some monster code modifies class data after calling this function

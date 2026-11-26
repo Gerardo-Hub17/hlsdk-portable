@@ -26,6 +26,7 @@
 #include "saverestore.h"
 #include "nodes.h"
 #include "doors.h"
+#include "gamerules.h"
 
 extern CGraph WorldGraph;
 
@@ -189,6 +190,8 @@ void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *
 
 	ALERT( at_aiconsole, "Firing: (%s)\n", targetName );
 
+	int coopFound = 0;
+
 	for( ; ; )
 	{
 		pentTarget = FIND_ENTITY_BY_TARGETNAME( pentTarget, targetName );
@@ -199,9 +202,14 @@ void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *
 		if( pTarget && !( pTarget->pev->flags & FL_KILLME ) )	// Don't use dying ents
 		{
 			ALERT( at_aiconsole, "Found: %s, firing (%s)\n", STRING( pTarget->pev->classname ), targetName );
+			coopFound++;
+			Coop_Log( "[COOP] fire '%s' -> %s (t=%.1f)\n", targetName, STRING( pTarget->pev->classname ), gpGlobals->time );
 			pTarget->Use( pActivator, pCaller, useType, value );
 		}
 	}
+
+	if( !coopFound )
+		Coop_Log( "[COOP] fire '%s' -> nobody with that name (t=%.1f)\n", targetName, gpGlobals->time );
 }
 
 LINK_ENTITY_TO_CLASS( DelayedUse, CBaseDelay )

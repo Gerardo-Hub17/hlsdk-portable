@@ -1926,6 +1926,34 @@ static CBasePlayer *Coop_Player( int index )
 	return (CBasePlayer *)pEnt;
 }
 
+void Coop_Log( const char *fmt, ... )
+{
+	static char lastMap[64];
+	static int lines;
+	char buffer[512];
+	va_list args;
+
+	if( !g_pGameRules || !g_pGameRules->IsCoOp() )
+		return;
+
+	// the cap counts per map, so a level that fires thousands of targets cannot flood the log
+	if( strncmp( lastMap, STRING( gpGlobals->mapname ), sizeof( lastMap ) - 1 ) != 0 )
+	{
+		strncpy( lastMap, STRING( gpGlobals->mapname ), sizeof( lastMap ) - 1 );
+		lastMap[sizeof( lastMap ) - 1] = '\0';
+		lines = 0;
+	}
+
+	if( ++lines > 600 )
+		return;
+
+	va_start( args, fmt );
+	vsnprintf( buffer, sizeof( buffer ), fmt, args );
+	va_end( args );
+
+	g_engfuncs.pfnServerPrint( buffer );
+}
+
 BOOL Coop_IsLeader( CBaseEntity *pPlayer )
 {
 	return pPlayer && pPlayer->edict() && ENTINDEX( pPlayer->edict() ) == 1;
